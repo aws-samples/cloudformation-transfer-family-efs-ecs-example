@@ -1,4 +1,6 @@
 #!/bin/bash
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: MIT-0
 
 set -e
 
@@ -49,6 +51,7 @@ aws cloudformation deploy \
     --template-file cloudformation/tenant.yaml \
     --capabilities CAPABILITY_NAMED_IAM \
     --parameter-overrides \
+    ProjectName=${PROJECT_NAME} \
     TenantId=${tenant_id} \
     PosixUserId=${posix_user_id} \
     PosixGroupId=${posix_group_id} \

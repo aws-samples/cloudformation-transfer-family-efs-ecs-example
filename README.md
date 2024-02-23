@@ -8,12 +8,14 @@ This example project demonstrates how to set up a containerized application envi
 
 ## Architecture
 
+![Architecture](assets/efs-ecs-transfer-family.png)
+
 The CloudFormation templates include the resources:
 
 - Amazon ECS cluster (shared between tenants)
 - Amazon ECS services (per tenant)
 - Amazon Transfer Family server (shared between tenants)
-- Amazon EFS volume (shared between tenants)
+- Amazon EFS file system (shared between tenants)
 - Amazon EFS access points (per tenant)
 
 ## Prerequisites
@@ -28,33 +30,26 @@ These deployment instructions are optimized to best work on Mac. Deployment in a
 1. Setup the required environment variables
 
 ```
-export AWS_REGION=<<replace with your region (i.e. ap-southeast-2)>>
-export AWS_ACCOUNT_ID=<<replace with your 12 digit AWS account ID>>
+export AWS_REGION=<<replace with your region (i.e. us-east-1)>>
 export PROJECT_NAME=example-efs-project  # or replace with a name of your choosing
 export SSH_PUBLIC_KEY=<<replace with SSH public key used for SFTP access>
 ```
 
 If necessary, also export your AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY values to gain programmatic access to your AWS account (it will be needed for subsequent steps).
 
-2. Deploy the base infrastructure (i.e. VPC, subnets)
+2. Deploy the base infrastructure (i.e. VPC, subnets, Transfer Family server)
 
 ```
 bin/deploy_base.sh
 ```
 
-4. Deploy the shared app infrastructure (i.e. ECS cluster, Transfer Family server)
-
-```
-bin/deploy_app.sh
-```
-
-5. Deploy a tenant's infrastructure (i.e. ECS service, EFS access point)
+3. Deploy a tenant's infrastructure (i.e. ECS service, EFS access point)
 
 ```
 bin/deploy_tenant.sh --tenant-id abc --posix-user-id 100 --posix-group-id 100
 ```
 
-6. Continue to add as many tenants as you need
+4. Continue to add as many tenants as you need
 
 ```
 bin/deploy_tenant.sh --tenant-id xyz --posix-user-id 200 --posix-group-id 200
@@ -84,7 +79,7 @@ put /tmp/test_file /abc/
 
 Your file should now be uploaded in tenant `abc`'s root directory.
 
-4. Confirm that the file is accessible from tenant `abc`'s ECS service using ECS exec.
+4. Confirm that the `test_file` file is accessible from tenant `abc`'s ECS service using ECS exec.
 
 ```
 bin/list_efs_tenant_files.sh --tenant-id abc
@@ -94,7 +89,4 @@ In the output you should see the file that you uploaded in step 3.
 
 ## Clean Up
 
-There is a chain of dependencies between the CloudFormation stacks.
-`app.yaml` relies on exports from `base.yaml`, and `tenant.yaml` relies on exports from `app.yaml`.
-
-To account for this and avoid dependencies when cleaning up, delete stacks in order of `tenant.yaml` -> `app.yaml` -> `app.yaml`.
+Delete the CloudFormation stacks in order of `tenant.yaml` -> `base.yaml`.

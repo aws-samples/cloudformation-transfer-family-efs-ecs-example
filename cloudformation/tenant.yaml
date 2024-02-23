@@ -1,5 +1,8 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: MIT-0
+
 Description: >
-  Tenant-related deployment resources. Relies on app.yaml exports.
+  Tenant-related deployment resources. Relies on base.yaml exports.
 
 Parameters:
   ProjectName:
