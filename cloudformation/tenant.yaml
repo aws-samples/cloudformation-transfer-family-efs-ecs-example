@@ -1,0 +1,203 @@
+Description: >
+  Tenant-related deployment resources. Relies on app.yaml exports.
+
+Parameters:
+  ProjectName:
+    Description: Name of the project used for name spacing exports.
+    Type: String
+    Default: example-efs-project
+
+  TenantId:
+    Description: Unique ID for the tenant
+    Type: String
+
+  PosixUserId:
+    Description: User ID of POSIX user
+    Type: Number
+
+  PosixGroupId:
+    Description: Group ID of POSIX group
+    Type: Number
+
+  BackendServiceName:
+    Description: Name of backend service
+    Type: String
+    Default: ExampleBackend
+
+  BackendImageUrl:
+    Description: URL of the ECR-hosted container image for the backend service
+    Type: String
+    Default: public.ecr.aws/amazonlinux/amazonlinux:minimal
+
+  SshPublicKey:
+    Description: SSH public key
+    Type: String
+
+Resources:
+  EcsExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: [ecs-tasks.amazonaws.com]
+            Action: ["sts:AssumeRole"]
+      ManagedPolicyArns:
+        - "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
+      Policies:
+        - PolicyName: AmazonECSTaskExecutionRolePolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                # Resource level scopes are not supported
+                Resource: "arn:aws:logs:*:*:*"
+
+  ApplicationTaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: [ecs-tasks.amazonaws.com]
+            Action: ["sts:AssumeRole"]
+      Policies:
+        - PolicyName: AmazonECSTaskRolePolicy
+          PolicyDocument:
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "ssmmessages:CreateControlChannel"
+                  - "ssmmessages:CreateDataChannel"
+                  - "ssmmessages:OpenControlChannel"
+                  - "ssmmessages:OpenDataChannel"
+                # Resource level scopes are not supported
+                Resource: "*"
+
+  BackendAppLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/${BackendServiceName}-${TenantId}"
+
+  BackendTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub "${BackendServiceName}-${TenantId}"
+      Cpu: "256"
+      Memory: "512"
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      ExecutionRoleArn: !GetAtt EcsExecutionRole.Arn
+      TaskRoleArn: !GetAtt ApplicationTaskRole.Arn
+      ContainerDefinitions:
+        - Name: "example-backend-app"
+          Image: !Ref "BackendImageUrl"
+          MountPoints:
+            - SourceVolume: data
+              ContainerPath: /data
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-region: !Ref AWS::Region
+              awslogs-group: !Ref BackendAppLogGroup
+              awslogs-stream-prefix: "/ecs"
+          Command:
+            - "tail"
+            - "-f"
+            - "/dev/null"
+      Volumes:
+        - Name: data
+          EFSVolumeConfiguration:
+            FilesystemId:
+              Fn::ImportValue: !Sub "${ProjectName}-EfsFileSystem"
+            TransitEncryption: ENABLED
+            AuthorizationConfig:
+              AccessPointId: !Ref TenantAccessPoint
+
+  EcsService:
+    Type: AWS::ECS::Service
+    Properties:
+      ServiceName: !Sub "${BackendServiceName}-${TenantId}"
+      Cluster:
+        Fn::ImportValue: !Sub "${ProjectName}-EcsCluster"
+      LaunchType: FARGATE
+      DeploymentConfiguration:
+        MaximumPercent: 200
+        MinimumHealthyPercent: 75
+      DesiredCount: 2
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: ENABLED
+          SecurityGroups:
+            - Fn::ImportValue: !Sub "${ProjectName}-BackendServiceSecurityGroup"
+          Subnets:
+            - Fn::ImportValue: !Sub "${ProjectName}-PrivateSubnet1"
+            - Fn::ImportValue: !Sub "${ProjectName}-PrivateSubnet2"
+      TaskDefinition: !Ref "BackendTaskDefinition"
+      EnableExecuteCommand: true
+
+  TenantAccessPoint:
+    Type: AWS::EFS::AccessPoint
+    Properties:
+      FileSystemId:
+        Fn::ImportValue: !Sub "${ProjectName}-EfsFileSystem"
+      PosixUser:
+        Gid: !Ref PosixGroupId
+        Uid: !Ref PosixUserId
+      RootDirectory:
+        Path: !Sub "/${TenantId}"
+        CreationInfo:
+          OwnerGid: !Ref PosixGroupId
+          OwnerUid: !Ref PosixUserId
+          Permissions: "0755"
+
+  TransferUser:
+    Type: AWS::Transfer::User
+    Properties:
+      ServerId:
+        Fn::ImportValue: !Sub "${ProjectName}-TransferServer"
+      UserName: !Ref TenantId
+      Role: !GetAtt TransferFamilyRole.Arn
+      HomeDirectoryMappings:
+        - Entry: !Sub "/${TenantId}"
+          Target: !Join
+            - ""
+            - - "/"
+              - Fn::ImportValue: !Sub "${ProjectName}-EfsFileSystem"
+              - !Sub "/${TenantId}"
+      HomeDirectoryType: LOGICAL
+      SshPublicKeys:
+        - !Ref SshPublicKey
+      PosixProfile:
+        Gid: !Ref PosixGroupId
+        Uid: !Ref PosixUserId
+
+  TransferFamilyRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: "Allow"
+            Principal:
+              Service: "transfer.amazonaws.com"
+            Action: "sts:AssumeRole"
+      Policies:
+        - PolicyName: "TransferFamilyPolicy"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: "Allow"
+                Action:
+                  - elasticfilesystem:ClientMount
+                  - elasticfilesystem:ClientWrite
+                  - elasticfilesystem:ClientRootAccess
+                Resource:
+                  Fn::ImportValue: !Sub "${ProjectName}-EfsFileSystemArn"

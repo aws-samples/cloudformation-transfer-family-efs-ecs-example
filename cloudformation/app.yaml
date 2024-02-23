@@ -1,0 +1,90 @@
+Description: >
+  Shared application resources. Relies on base.yaml exports.
+
+Parameters:
+  ProjectName:
+    Description: Name of the project used for name spacing exports.
+    Type: String
+    Default: example-efs-project
+
+Resources:
+  EcsCluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: !Ref ProjectName
+
+  BackendServiceSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      VpcId:
+        Fn::ImportValue: !Sub "${ProjectName}-Vpc"
+      GroupDescription: Security Group to manage access to backend services
+
+  EfsSecurityGroup:
+    Type: "AWS::EC2::SecurityGroup"
+    Properties:
+      GroupDescription: "Security group for the EFS volume"
+      VpcId:
+        Fn::ImportValue: !Sub "${ProjectName}-Vpc"
+      SecurityGroupIngress:
+        - FromPort: 2049
+          IpProtocol: "tcp"
+          ToPort: 2049
+          SourceSecurityGroupId: !GetAtt BackendServiceSecurityGroup.GroupId
+
+  EfsFileSystem:
+    Type: AWS::EFS::FileSystem
+    Properties:
+      ThroughputMode: bursting
+
+  MountTarget1:
+    Type: AWS::EFS::MountTarget
+    Properties:
+      FileSystemId: !Ref EfsFileSystem
+      SecurityGroups:
+        - !Ref EfsSecurityGroup
+      SubnetId:
+        Fn::ImportValue: !Sub "${ProjectName}-PrivateSubnet1"
+
+  MountTarget2:
+    Type: AWS::EFS::MountTarget
+    Properties:
+      FileSystemId: !Ref EfsFileSystem
+      SecurityGroups:
+        - !Ref EfsSecurityGroup
+      SubnetId:
+        Fn::ImportValue: !Sub "${ProjectName}-PrivateSubnet2"
+
+  TransferServer:
+    Type: AWS::Transfer::Server
+    Properties:
+      Domain: EFS
+      IdentityProviderType: SERVICE_MANAGED
+      EndpointType: PUBLIC
+
+Outputs:
+  EcsCluster:
+    Description: Name of the ECS cluster
+    Value: !Ref EcsCluster
+    Export:
+      Name: !Sub "${ProjectName}-EcsCluster"
+  BackendServiceSecurityGroup:
+    Description: ID of the Security Group used by backend services
+    Value: !Ref BackendServiceSecurityGroup
+    Export:
+      Name: !Sub "${ProjectName}-BackendServiceSecurityGroup"
+  EfsFileSystem:
+    Description: ID of the EFS volume
+    Value: !Ref EfsFileSystem
+    Export:
+      Name: !Sub "${ProjectName}-EfsFileSystem"
+  EfsFileSystemArn:
+    Description: ARN of the EFS volume
+    Value: !GetAtt EfsFileSystem.Arn
+    Export:
+      Name: !Sub "${ProjectName}-EfsFileSystemArn"
+  TransferServer:
+    Description: Transfer Family server ID
+    Value: !GetAtt TransferServer.ServerId
+    Export:
+      Name: !Sub "${ProjectName}-TransferServer"
